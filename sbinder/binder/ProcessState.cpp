@@ -48,11 +48,6 @@
 
 namespace android {
  
-// Global variables
-int                 mArgC;
-const char* const*  mArgV;
-int                 mArgLen;
-
 class PoolThread : public Thread
 {
 public:
@@ -64,6 +59,7 @@ public:
 protected:
     virtual bool threadLoop()
     {
+    	ALOGI("PoolThread");
         IPCThreadState::self()->joinThreadPool(mIsMain);
         return false;
     }
@@ -75,6 +71,7 @@ sp<ProcessState> ProcessState::self()
 {
     Mutex::Autolock _l(gProcessMutex);
     if (gProcess != NULL) {
+		ALOGI("self");
         return gProcess;
     }
     gProcess = new ProcessState;
@@ -83,22 +80,28 @@ sp<ProcessState> ProcessState::self()
 
 void ProcessState::setContextObject(const sp<IBinder>& object)
 {
+	ALOGI("setContextObject");
+
     setContextObject(object, String16("default"));
 }
 
-sp<IBinder> ProcessState::getContextObject(const sp<IBinder>& caller)
+sp<IBinder> ProcessState::getContextObject(const sp<IBinder>& /*caller*/)
 {
+	ALOGI("getContextObject");
     return getStrongProxyForHandle(0);
 }
 
 void ProcessState::setContextObject(const sp<IBinder>& object, const String16& name)
 {
     AutoMutex _l(mLock);
+	ALOGI("setContextObject");
     mContexts.add(name, object);
 }
 
 sp<IBinder> ProcessState::getContextObject(const String16& name, const sp<IBinder>& caller)
 {
+	ALOGI("getContextObject 1");
+
     mLock.lock();
     sp<IBinder> object(
         mContexts.indexOfKey(name) >= 0 ? mContexts.valueFor(name) : NULL);
@@ -137,6 +140,7 @@ void ProcessState::startThreadPool()
 {
     AutoMutex _l(mLock);
     if (!mThreadPoolStarted) {
+		ALOGI("startThreadPool");
         mThreadPoolStarted = true;
         spawnPooledThread(true);
     }
@@ -144,12 +148,15 @@ void ProcessState::startThreadPool()
 
 bool ProcessState::isContextManager(void) const
 {
+	ALOGI("isContextManager");
+
     return mManagesContexts;
 }
 
 bool ProcessState::becomeContextManager(context_check_func checkFunc, void* userData)
 {
     if (!mManagesContexts) {
+		ALOGI("becomeContextManager");
         AutoMutex _l(mLock);
         mBinderContextCheckFunc = checkFunc;
         mBinderContextUserData = userData;
@@ -170,6 +177,7 @@ bool ProcessState::becomeContextManager(context_check_func checkFunc, void* user
 ProcessState::handle_entry* ProcessState::lookupHandleLocked(int32_t handle)
 {
     const size_t N=mHandleToObject.size();
+	ALOGI("lookupHandleLocked %d",N);
     if (N <= (size_t)handle) {
         handle_entry e;
         e.binder = NULL;
@@ -185,6 +193,7 @@ sp<IBinder> ProcessState::getStrongProxyForHandle(int32_t handle)
     sp<IBinder> result;
 
     AutoMutex _l(mLock);
+	ALOGI("getStrongProxyForHandle");
 
     handle_entry* e = lookupHandleLocked(handle);
 
@@ -242,6 +251,7 @@ wp<IBinder> ProcessState::getWeakProxyForHandle(int32_t handle)
     wp<IBinder> result;
 
     AutoMutex _l(mLock);
+	ALOGI("getWeakProxyForHandle");
 
     handle_entry* e = lookupHandleLocked(handle);
 
@@ -271,7 +281,7 @@ wp<IBinder> ProcessState::getWeakProxyForHandle(int32_t handle)
 void ProcessState::expungeHandle(int32_t handle, IBinder* binder)
 {
     AutoMutex _l(mLock);
-    
+    ALOGI("expungeHandle");
     handle_entry* e = lookupHandleLocked(handle);
 
     // This handle may have already been replaced with a new BpBinder
@@ -280,39 +290,10 @@ void ProcessState::expungeHandle(int32_t handle, IBinder* binder)
     if (e && e->binder == binder) e->binder = NULL;
 }
 
-void ProcessState::setArgs(int argc, const char* const argv[])
-{
-    mArgC = argc;
-    mArgV = (const char **)argv;
-
-    mArgLen = 0;
-    for (int i=0; i<argc; i++) {
-        mArgLen += strlen(argv[i]) + 1;
-    }
-    mArgLen--;
-}
-
-int ProcessState::getArgC() const
-{
-    return mArgC;
-}
-
-const char* const* ProcessState::getArgV() const
-{
-    return mArgV;
-}
-
-void ProcessState::setArgV0(const char* txt)
-{
-    if (mArgV != NULL) {
-        strncpy((char*)mArgV[0], txt, mArgLen);
-        set_process_name(txt);
-    }
-}
-
 String8 ProcessState::makeBinderThreadName() {
     int32_t s = android_atomic_add(1, &mThreadPoolSeq);
     String8 name;
+	ALOGI("makeBinderThreadName");
     name.appendFormat("Binder_%X", s);
     return name;
 }
@@ -321,13 +302,14 @@ void ProcessState::spawnPooledThread(bool isMain)
 {
     if (mThreadPoolStarted) {
         String8 name = makeBinderThreadName();
-        ALOGV("Spawning new pooled thread, name=%s\n", name.string());
+        ALOGI("Spawning new pooled thread, name=%s\n", name.string());
         sp<Thread> t = new PoolThread(isMain);
         t->run(name.string());
     }
 }
 
 status_t ProcessState::setThreadPoolMaxThreadCount(size_t maxThreads) {
+	ALOGI("setThreadPoolMaxThreadCount");
     status_t result = NO_ERROR;
     if (ioctl(mDriverFD, BINDER_SET_MAX_THREADS, &maxThreads) == -1) {
         result = -errno;
@@ -337,15 +319,17 @@ status_t ProcessState::setThreadPoolMaxThreadCount(size_t maxThreads) {
 }
 
 void ProcessState::giveThreadPoolName() {
+	ALOGI("giveThreadPoolName");
     androidSetThreadName( makeBinderThreadName().string() );
 }
 
 static int open_driver()
 {
     int fd = open("/dev/sbinder", O_RDWR);
+	ALOGI("open_driver fd = %d",fd);
     if (fd >= 0) {
         fcntl(fd, F_SETFD, FD_CLOEXEC);
-        int vers;
+        int vers = 0;
         status_t result = ioctl(fd, BINDER_VERSION, &vers);
         if (result == -1) {
             ALOGE("Binder ioctl to obtain version failed: %s", strerror(errno));
@@ -377,6 +361,8 @@ ProcessState::ProcessState()
     , mThreadPoolStarted(false)
     , mThreadPoolSeq(1)
 {
+	ALOGI("ProcessState mDriverFD = %d",mDriverFD);
+
     if (mDriverFD >= 0) {
         // XXX Ideally, there should be a specific define for whether we
         // have mmap (or whether we could possibly have the kernel module
@@ -400,6 +386,8 @@ ProcessState::ProcessState()
 
 ProcessState::~ProcessState()
 {
+	ALOGI("~ProcessState");
+
 }
         
 }; // namespace android
